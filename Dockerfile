@@ -1,11 +1,12 @@
 FROM php:8.2-apache
 
-# Инсталиране на нужните пакети за Symfony и MySQL
+# Инсталиране на нужните пакети за Symfony, SQLite и ZIP архиви
 RUN apt-get update && apt-get install -y \
     git \
     unzip \
+    libsqlite3-dev \
     libzip-dev \
-    && docker-php-ext-install pdo pdo_mysql zip
+    && docker-php-ext-install pdo pdo_sqlite pdo_mysql zip
 
 # Активиране на Apache mod_rewrite за Symfony
 RUN a2enmod rewrite
@@ -27,5 +28,5 @@ WORKDIR /var/www/html
 # Инсталиране на Symfony зависимостите
 RUN composer install --no-dev --optimize-autoloader
 
-# Права за писане в папките за кеш и логове
+# Права за писане в папките за кеш, логове и базата данни (var папка)
 RUN chown -R www-data:www-data /var/www/html/var /var/www/html/public
