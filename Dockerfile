@@ -17,3 +17,15 @@ RUN sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf
 
 # Инсталиране на Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+# Копиране на проекта в контейнера
+COPY . /var/www/html
+
+# Задаване на работна директория
+WORKDIR /var/www/html
+
+# Инсталиране на Symfony зависимостите
+RUN composer install --no-dev --optimize-autoloader
+
+# Права за писане в папките за кеш и логове
+RUN chown -R www-data:www-data /var/www/html/var /var/www/html/public
