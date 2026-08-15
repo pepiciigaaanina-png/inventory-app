@@ -91,6 +91,7 @@
 </div>
 
 <script>
+    console.log("вяевяе");
     const searchInput = document.getElementById('searchInput');
     const tableBody = document.getElementById('tableBody');
     const cameraInput = document.getElementById('cameraInput');
@@ -315,11 +316,9 @@
 
             console.log("👉 HTTP СТАТУС ОТ СЪРВЪРА:", response.status);
 
-            // Ако сървърът гръмне с 500 (напр. PHP грешка), често връща HTML, а не JSON
             const textResult = await response.text();
             console.log("👉 ОТГОВОР ОТ СЪРВЪРА (RAW):", textResult);
 
-            // Опитваме да парснем отговора като JSON
             let result;
             try {
                 result = JSON.parse(textResult);

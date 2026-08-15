@@ -1,32 +1,27 @@
 FROM php:8.2-apache
 
-# Инсталиране на нужните пакети за Symfony, SQLite и ZIP архиви
+# Инсталиране на системни пакети
 RUN apt-get update && apt-get install -y \
     git \
     unzip \
     libsqlite3-dev \
     libzip-dev \
-    && docker-php-ext-install pdo pdo_sqlite pdo_mysql zip
+    libicu-dev \
+    libpng-dev \
+    libjpeg-dev \
+    && docker-php-ext-configure gd --with-jpeg \
+    && docker-php-ext-install pdo pdo_sqlite pdo_mysql zip intl ctype iconv gd
 
-# Активиране на Apache mod_rewrite за Symfony
+# Активиране на mod_rewrite за Symfony
 RUN a2enmod rewrite
 
-# Настройка на DocumentRoot да сочи към public папката на Symfony
-ENV APACHE_DOCUMENT_ROOT /var/www/html/public
+# Настройка на Apache DocumentRoot към public/ и разрешаване на .htaccess (AllowOverride All)
+ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
 RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf
 RUN sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
+RUN echo '<Directory /var/www/html/public>\n    AllowOverride All\n    Require all granted\n</Directory>' >> /etc/apache2/apache2.conf
 
 # Инсталиране на Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Копиране на проекта в контейнера
-COPY . /var/www/html
-
-# Задаване на работна директория
 WORKDIR /var/www/html
-
-# Инсталиране на Symfony зависимостите
-RUN composer install --no-dev --optimize-autoloader
-
-# Права за писане в папките за кеш, логове и базата данни (var папка)
-RUN chown -R www-data:www-data /var/www/html/var /var/www/html/public

@@ -6,35 +6,96 @@ use App\Entity\Item;
 use App\Repository\ItemRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Annotation\Route;
+use Cloudinary;
+use Cloudinary\Uploader;
 
 class SearchController extends AbstractController
 {
     #[Route('/search', name: 'app_search')]
     public function index(Request $request, ItemRepository $itemRepository): Response
     {
-        $query = $request->query->get('q', '');
+        $query = trim($request->query->get('q', ''));
+
+        // Взимаме всички артикули от базата
+        $allItems = $itemRepository->findAll();
 
         if ($query) {
-            $items = $itemRepository->createQueryBuilder('i')
-                ->where('LOWER(i.name) LIKE :query OR LOWER(i.code) LIKE :query')
-                ->setParameter('query', '%' . mb_strtolower($query, 'UTF-8') . '%')
-                ->getQuery()
-                ->getResult();
+            // Търсенето: правим го на малки букви с поддръжка на кирилица (UTF-8)
+            $search = mb_strtolower($query, 'UTF-8');
+
+            $items = array_filter($allItems, function ($item) use ($search) {
+                // Взимаме името и кода и ги правим на малки букви
+                $name = mb_strtolower($item->getName() ?? '', 'UTF-8');
+                $code = mb_strtolower($item->getCode() ?? '', 'UTF-8');
+
+                // Проверяваме дали търсената дума се съдържа в името или кода
+                return str_contains($name, $search) || str_contains($code, $search);
+            });
+
+            // Преиндексираме масива, за да е правилен JSON списък
+            $items = array_values($items);
         } else {
-            $items = $itemRepository->findAll();
+            $items = $allItems;
         }
 
+        // Ако заявката идва от JavaScript (AJAX) - връщаме JSON
         if ($request->headers->get('Accept') === 'application/json') {
             return $this->json($items);
         }
 
+        // Ако е нормално зареждане на страницата - връщаме Twig шаблона
         return $this->render('search/index.html.twig', [
             'items' => $items,
             'query' => $query,
         ]);
+    }
+    #[Route('/api/upload-item-image', name: 'api_upload_item_image', methods: ['POST'])]
+    public function uploadItemImage(Request $request, ItemRepository $itemRepository, EntityManagerInterface $entityManager): Response
+    {
+        $uploadedFile = $request->files->get('image');
+        $itemId = $request->request->get('item_id'); // Взимаме ID-то на артикула
+
+        if (!$uploadedFile) {
+            return $this->json(['error' => 'Няма прикачен файл'], 400);
+        }
+
+        try {
+            // 1. Конфигурираме Cloudinary
+            Cloudinary::config_from_url($_ENV['CLOUDINARY_URL'] ?? $_SERVER['CLOUDINARY_URL']);
+
+            // 2. Качваме в облака
+            $uploadResult = Uploader::upload($uploadedFile->getPathname(), [
+                'folder' => 'inventory_diploma',
+                'resource_type' => 'image'
+            ]);
+
+            $imageUrl = $uploadResult['secure_url'];
+
+            // 3. Ако е подадено item_id, записваме линка в базата към съответния артикул!
+            if ($itemId) {
+                $item = $itemRepository->find($itemId);
+                if ($item) {
+                    $item->setImageUrl($imageUrl);
+                    $entityManager->flush();
+                }
+            }
+
+            return $this->json([
+                'success' => true,
+                'url' => $imageUrl,
+                'message' => 'Снимката е качена успешно и е закрепена към артикула!'
+            ]);
+
+        } catch (\Exception $e) {
+            return $this->json([
+                'success' => false,
+                'error' => 'Грешка при качване в Cloudinary: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     #[Route('/api/update-item-inline', name: 'api_update_item_inline', methods: ['POST'])]
@@ -75,32 +136,20 @@ class SearchController extends AbstractController
     #[Route('/api/analyze-image', name: 'api_analyze_image', methods: ['POST'])]
     public function analyzeImage(Request $request, ItemRepository $itemRepository, \App\Service\GeminiService $geminiService): Response
     {
-        $filePath = null;
-
         $uploadedFile = $request->files->get('image');
+        $base64Image = null;
+        $mimeType = 'image/jpeg';
+
         if ($uploadedFile) {
-            $uploadsDir = $this->getParameter('kernel.project_dir') . '/public/uploads';
-            $newFilename = uniqid('img_', true) . '.' . $uploadedFile->guessExtension();
-            $uploadedFile->move($uploadsDir, $newFilename);
-            $filePath = $uploadsDir . '/' . $newFilename;
+            // Четем файла директно от временната папка в паметта, БЕЗ да го запазваме на диска!
+            $base64Image = base64_encode(file_get_contents($uploadedFile->getPathname()));
+            $mimeType = $uploadedFile->getMimeType();
         } else {
-            $data = json_decode($request->getContent(), true);
-            $filename = $data['filename'] ?? $request->request->get('filename');
-
-            if ($filename) {
-                $filePath = $this->getParameter('kernel.project_dir') . '/public/uploads/' . $filename;
-            }
-        }
-
-        if (!$filePath || !file_exists($filePath)) {
-            return $this->json(['error' => 'Няма намерен файл за обработка!'], 400);
+            // Ако няма файл, връщаме грешка
+            return $this->json(['error' => 'Няма прикачен файл за анализ!'], 400);
         }
 
         try {
-            $base64Image = base64_encode(file_get_contents($filePath));
-            $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
-            $mimeType = ($ext === 'png') ? 'image/png' : 'image/jpeg';
-
             // Изискваме от AI да върне задължително "unit" (мерна единица)
             $prompt = 'Ти си експерт по инвентаризация и разчитане на документи за военни материални средства. ' .
                 'На тази снимка има протокол с множество редове (материали). ' .
@@ -142,7 +191,7 @@ class SearchController extends AbstractController
                     'code' => $code,
                     'scanned_name' => $scannedItem['name'] ?? 'Няма име',
                     'scanned_quantity' => $scannedItem['quantity'] ?? 0,
-                    'scanned_unit' => $scannedItem['unit'] ?? 'бр.', // Извличаме мерната единица
+                    'scanned_unit' => $scannedItem['unit'] ?? 'бр.',
                     'exists_in_db' => $dbItem !== null,
                     'db_id' => $dbItem ? $dbItem->getId() : null,
                     'db_name' => $dbItem ? $dbItem->getName() : null,
@@ -180,8 +229,6 @@ class SearchController extends AbstractController
             $scannedName = $scannedItem['scanned_name'] ?? 'Нов артикул';
             $scannedQty = floatval($scannedItem['scanned_quantity'] ?? 0);
             $scannedUnit = $scannedItem['scanned_unit'] ?? 'бр.';
-
-            // НОВО: Четем цената, която Android приложението ни изпраща!
             $scannedPrice = floatval($scannedItem['scanned_price'] ?? 0.00);
 
             if (!$code || $scannedQty <= 0) continue;
@@ -195,12 +242,9 @@ class SearchController extends AbstractController
                     $dbItem->setName($scannedName);
                     $dbItem->setQuantity((string)$scannedQty);
                     $dbItem->setUnit($scannedUnit);
-
-                    // НОВО: Записваме истинската цена, а не 0.00
                     $dbItem->setPrice($scannedPrice);
 
                     $entityManager->persist($dbItem);
-
                     $processedLog[] = "Създаден нов: {$scannedName} ({$code}) с количество {$scannedQty} {$scannedUnit} на цена {$scannedPrice}";
                 } else {
                     $processedLog[] = "Пропуснат (липсва в БД за изписване): {$code}";
@@ -224,7 +268,6 @@ class SearchController extends AbstractController
                 $newStock = $currentStock + $scannedQty;
                 $dbItem->setQuantity((string)$newStock);
 
-                // НОВО: Ако добавяме наличност и сме въвели нова цена от телефона, я обновяваме и нея
                 if ($scannedPrice > 0) {
                     $dbItem->setPrice($scannedPrice);
                 }
