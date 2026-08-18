@@ -91,7 +91,6 @@
 </div>
 
 <script>
-    console.log("вяевяе");
     const searchInput = document.getElementById('searchInput');
     const tableBody = document.getElementById('tableBody');
     const cameraInput = document.getElementById('cameraInput');
@@ -116,17 +115,22 @@
         let sumPrice = 0;
 
         items.forEach(item => {
-            sumQty += parseFloat(item.quantity) || 0;
-            sumPrice += parseFloat(item.price) || 0;
+            const qty = parseFloat(item.quantity) || 0;
+            const unitPrice = parseFloat(item.price) || 0;
+            const totalRowPrice = qty * unitPrice;
+
+            sumQty += qty;
+            sumPrice += totalRowPrice;
 
             tableBody.innerHTML += `<tr id="row-${item.id}">
                 <td class="text-muted fw-semibold ps-3">${item.code || '-'}</td>
                 <td class="fw-medium">${item.name}</td>
                 <td class="text-center">
                     <div class="input-group input-group-sm justify-content-center">
-                        <input type="number" step="any" id="qty-${item.id}" class="form-control form-control-sm text-center" value="${item.quantity}"
+                        <input type="number" step="any" id="qty-${item.id}" class="form-control form-control-sm text-center item-qty" data-id="${item.id}" value="${qty}"
                                disabled
-                               style="background-color: #e9ecef;">
+                               style="background-color: #e9ecef;"
+                               oninput="multiplyRowPrice(${item.id})">
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="edit-qty-btn-${item.id}" onclick="toggleMainRowEdit(${item.id}, 'qty')">✏️</button>
                     </div>
                 </td>
@@ -140,9 +144,10 @@
                 </td>
                 <td class="text-end pe-3">
                     <div class="input-group input-group-sm justify-content-end">
-                        <input type="number" step="any" id="price-${item.id}" class="form-control form-control-sm price-input" value="${item.price || 0}"
+                        <input type="number" step="any" id="price-${item.id}" class="form-control form-control-sm price-input item-price" data-id="${item.id}" data-unit-price="${unitPrice}" value="${totalRowPrice.toFixed(2)}"
                                disabled
-                               style="background-color: #e9ecef;">
+                               style="background-color: #e9ecef;"
+                               oninput="updateGrandTotals()">
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="edit-price-btn-${item.id}" onclick="toggleMainRowEdit(${item.id}, 'price')">✏️</button>
                         <span class="input-group-text bg-light text-muted">лв.</span>
                     </div>
@@ -152,6 +157,41 @@
 
         document.getElementById('totalQtyHeader').textContent = `(общо: ${sumQty.toFixed(2)})`;
         document.getElementById('totalPriceHeader').textContent = `(общо: ${sumPrice.toFixed(2)} лв.)`;
+    }
+
+    // Умножава новия брой по единичната цена и обновява цената на реда на живо
+    function multiplyRowPrice(id) {
+        const qtyInput = document.getElementById(`qty-${id}`);
+        const priceInput = document.getElementById(`price-${id}`);
+
+        if (qtyInput && priceInput) {
+            const qty = parseFloat(qtyInput.value) || 0;
+            const unitPrice = parseFloat(priceInput.getAttribute('data-unit-price')) || 0;
+
+            const newTotalRowPrice = qty * unitPrice;
+            priceInput.value = newTotalRowPrice.toFixed(2);
+        }
+
+        updateGrandTotals();
+    }
+
+    // Динамично пресмятане на общите суми горе в заглавието на таблицата
+    function updateGrandTotals() {
+        let totalQty = 0;
+        let totalPrice = 0;
+
+        document.querySelectorAll('.item-qty').forEach(input => {
+            const id = input.getAttribute('data-id');
+            const priceInput = document.getElementById(`price-${id}`);
+            const qty = parseFloat(input.value) || 0;
+            const price = priceInput ? (parseFloat(priceInput.value) || 0) : 0;
+
+            totalQty += qty;
+            totalPrice += price;
+        });
+
+        document.getElementById('totalQtyHeader').textContent = `(общо: ${totalQty.toFixed(2)})`;
+        document.getElementById('totalPriceHeader').textContent = `(общо: ${totalPrice.toFixed(2)} лв.)`;
     }
 
     async function toggleMainRowEdit(id, field) {
@@ -285,7 +325,7 @@
 
     async function submitBatchInventory(action) {
         const checkboxes = document.querySelectorAll('#modalTableBody input.modal-checkbox:checked');
-        const selectedItems = [];
+        let selectedItems = [];
 
         checkboxes.forEach(cb => {
             const index = cb.getAttribute('data-index');
@@ -299,9 +339,6 @@
             }
         });
 
-        console.log("👉 ОПИТ ЗА ЗАПИС! Действие:", action);
-        console.log("👉 ДАННИ ЗА ИЗПРАЩАНЕ:", selectedItems);
-
         if (selectedItems.length === 0) {
             alert('Моля, изберете поне един артикул!');
             return;
@@ -314,16 +351,11 @@
                 body: JSON.stringify({ action: action, items: selectedItems })
             });
 
-            console.log("👉 HTTP СТАТУС ОТ СЪРВЪРА:", response.status);
-
             const textResult = await response.text();
-            console.log("👉 ОТГОВОР ОТ СЪРВЪРА (RAW):", textResult);
-
             let result;
             try {
                 result = JSON.parse(textResult);
             } catch (e) {
-                console.error("🚨 Сървърът не върна JSON! Има PHP грешка. Виж RAW отговора по-горе.");
                 alert("Фатална грешка в сървъра (виж конзолата - F12)");
                 return;
             }
@@ -336,8 +368,7 @@
                 alert(result.error || 'Възникна грешка.');
             }
         } catch (error) {
-            console.error('🚨 ГРЕШКА ПРИ ВРЪЗКАТА:', error);
-            alert('Грешка при връзка със сървъра! Виж конзолата (F12).');
+            alert('Грешка при връзка със сървъра!');
         }
     }
 </script>
