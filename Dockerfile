@@ -25,3 +25,14 @@ RUN echo '<Directory /var/www/html/public>\n    AllowOverride All\n    Require a
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www/html
+
+# --- ДОБАВЕНИТЕ РЕДОВЕ ЗА RENDER ---
+
+# 1. Копираме целия код от проекта вътре в сървъра
+COPY . /var/www/html/
+
+# 2. Инсталираме зависимостите на Symfony (без това няма vendor папка и сайтът е празен)
+RUN composer install --no-interaction --optimize-autoloader
+
+# 3. Даваме нужните права на Apache да чете файловете и да пише в кеша
+RUN chown -R www-data:www-data /var/www/html/var /var/www/html/public
