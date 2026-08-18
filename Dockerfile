@@ -35,4 +35,4 @@ COPY . /var/www/html/
 RUN composer install --no-interaction --optimize-autoloader --no-scripts
 
 # 3. Даваме нужните права на Apache да чете файловете и да пише в кеша
-RUN chown -R www-data:www-data /var/www/html/var /var/www/html/public
+RUN mkdir -p /var/www/html/var && chown -R www-data:www-data /var/www/html/var /var/www/html/public
