@@ -284,4 +284,76 @@ class SearchController extends AbstractController
             'log' => $processedLog
         ]);
     }
+    #[Route('/api/suggest-location', name: 'api_suggest_location', methods: ['GET'])]
+    public function suggestLocation(Request $request, \App\Service\GeminiService $geminiService): Response
+    {
+        $itemName = $request->query->get('item');
+
+        if (!$itemName) {
+            return $this->json(['error' => 'Липсва артикул'], 400);
+        }
+
+        // --- БЕЗОТКАЗНО ИЗЧИСТВАНЕ НА ИМЕТО ---
+        // 1. Цепим по наклонената черта "\" (ако има такава в кода)
+        $parts = explode('\\', $itemName);
+        // Взимаме само втората част (текста), ако има черта, иначе взимаме цялото
+        $cleanItemName = count($parts) > 1 ? trim($parts[1]) : trim($itemName);
+
+        // 2. За всеки случай махаме останали цифри и точки в самото начало
+        $cleanItemName = preg_replace('/^[\d\.\s]+/u', '', $cleanItemName);
+
+        $clean = mb_strtolower($cleanItemName, 'UTF-8');
+        $nameLower = mb_strtolower($itemName, 'UTF-8');
+
+        $suggestion = '';
+
+        // --- ЕЛЕКТРОМАТЕРИАЛИ ---
+        if (str_contains($nameLower, 'прекъсвач') || str_contains($nameLower, 'кабел') || str_contains($nameLower, 'контакт') || str_contains($nameLower, 'конзола') || str_contains($nameLower, 'антигрон') || str_contains($nameLower, 'лампа') || str_contains($nameLower, 'прожектор') || str_contains($nameLower, 'осветит') || str_contains($nameLower, 'предпазител') || str_contains($nameLower, 'ключ ел')) {
+            $suggestion = "Това е $clean. Предлагам да се изпише за монтаж в главното ел. табло на ДЕС или за поддръжка на електроинсталацията в щаба.";
+        }
+        // --- ВИК И САНИТАРИЯ ---
+        elseif (str_contains($nameLower, 'тройник') || str_contains($nameLower, 'тръба') || str_contains($nameLower, 'сифон') || str_contains($nameLower, 'кран') || str_contains($nameLower, 'моноблок') || str_contains($nameLower, 'коляно') || str_contains($nameLower, 'холендър') || str_contains($nameLower, 'pvc') || str_contains($nameLower, 'ппр') || str_contains($nameLower, 'клекало') || str_contains($nameLower, 'седалка')) {
+            $suggestion = "Това е $clean. Предлагам да се изпише за ремонт на водопроводната инсталация в санитарните възли на казармените помещения.";
+        }
+        // --- СТРОИТЕЛНИ МАТЕРИАЛИ И БОИ ---
+        elseif (str_contains($nameLower, 'боя') || str_contains($nameLower, 'латекс') || str_contains($nameLower, 'вар') || str_contains($nameLower, 'цимент') || str_contains($nameLower, 'воалит') || str_contains($nameLower, 'улук') || str_contains($nameLower, 'шпакла') || str_contains($nameLower, 'снадка') || str_contains($nameLower, 'кол')) {
+            $suggestion = "Това е $clean. Предлагам да се изпише за хидроизолация на покрива или козметично освежаване на сградите в района на поделението.";
+        }
+        // --- ИНСТРУМЕНТИ, ЖЕЛЕЗАРИЯ, РАБОТИЛНИЦА ---
+        elseif (str_contains($nameLower, 'трион') || str_contains($nameLower, 'поялник') || str_contains($nameLower, 'четка') || str_contains($nameLower, 'шкурка') || str_contains($nameLower, 'диск') || str_contains($nameLower, 'лопата') || str_contains($nameLower, 'брадва') || str_contains($nameLower, 'кирка') || str_contains($nameLower, 'лом') || str_contains($nameLower, 'тесла') || str_contains($nameLower, 'ъглошлайф') || str_contains($nameLower, 'перфоратор') || str_contains($nameLower, 'електроди') || str_contains($nameLower, 'брава')) {
+            $suggestion = "Това е $clean. Предлагам да се зачисли на техническия взвод за извършване на текущи ремонти по инфраструктурата.";
+        }
+        // --- ГСМ, АВТО И ГРАДИНСКА ---
+        elseif (str_contains($nameLower, 'коса') || str_contains($nameLower, 'тример') || str_contains($nameLower, 'корда') || str_contains($nameLower, 'глава') || str_contains($nameLower, 'масло') || str_contains($nameLower, 'верига') || str_contains($nameLower, 'резачка') || str_contains($nameLower, 'ауспух') || str_contains($nameLower, 'жило') || str_contains($nameLower, 'шина')) {
+            $suggestion = "Това е $clean. Предлагам да се изпише за косене около РТВ позициите или за обслужване на техниката в автопарка.";
+        }
+        // --- ПРОТИВОПОЖАРНО ОБОРУДВАНЕ ---
+        elseif (str_contains($nameLower, 'пожаро') || str_contains($nameLower, 'кофпомпа') || str_contains($nameLower, 'струйник') || str_contains($nameLower, 'ведро') || str_contains($nameLower, 'камбана')) {
+            $suggestion = "Това е $clean. Предлагам да се зачисли и разположи на пожарните табла до складовете за ГСМ, автопарка или КИС.";
+        }
+        // --- ЛПС - ЛИЧНИ ПРЕДПАЗНИ СРЕДСТВА ---
+        elseif (str_contains($nameLower, 'ръкавици') || str_contains($nameLower, 'кожа') || str_contains($nameLower, 'антифон') || str_contains($nameLower, 'маска')) {
+            $suggestion = "Това са $clean. Предлагам да се раздадат на личния състав от ремонтната работилница за безопасна работа с техниката.";
+        }
+        // --- МЕБЕЛИ, БИТОВИ УРЕДИ И КАСИ ---
+        elseif (str_contains($nameLower, 'стол') || str_contains($nameLower, 'гарнитура') || str_contains($nameLower, 'каса') || str_contains($nameLower, 'гардероб') || str_contains($nameLower, 'диван') || str_contains($nameLower, 'библиотека') || str_contains($nameLower, 'табуретка') || str_contains($nameLower, 'климатик') || str_contains($nameLower, 'радиатор')) {
+            $suggestion = "Това е $clean. Предлагам да се изпише за оборудване на стаята за почивка, дежурната стая или щабните канцеларии.";
+        }
+        // --- СПЕЦИАЛИЗИРАНО ВОЕННО ИМУЩЕСТВО ---
+        elseif (str_contains($nameLower, 'мрежа маскировъчна') || str_contains($nameLower, 'сандък') || str_contains($nameLower, 'фенер') || str_contains($nameLower, 'ремарке')) {
+            $suggestion = "Това е $clean. Предлагам да се зачисли за осигуряване на полевите лагери, ученията или охраната на РТВ позицията.";
+        }
+        // --- ВСИЧКО ОСТАНАЛО ---
+        else {
+            try {
+                $prompt = "Ти си главен експерт по КЕИ в РТВ военно формирование Радишево. Анализирай артикула: '$cleanItemName'. Напиши точно 1 изречение (до 20 думи), в което посочваш какво е това и къде точно в поделението да се използва. Започни с 'Това е...'. Говори експертно.";
+                $rawResult = $geminiService->analyzeImage($prompt, null, null);
+                $suggestion = trim(str_replace(['```json', '```', '"', '[', ']'], '', $rawResult));
+            } catch (\Throwable $e) {
+                $suggestion = "Това е $clean. Предлагам да се изпише за текущата експлоатационна поддръжка във формированието.";
+            }
+        }
+
+        return $this->json(['suggestion' => $suggestion]);
+    }
 }
